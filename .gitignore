@@ -12,3 +12,6 @@ test/
 *.npz
 
 *.zip
+
+__pycache__/
+**/__pycache__/
