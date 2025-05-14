@@ -130,24 +130,41 @@ class RIFEInference:
         # Postprocess result
         return self.postprocess_frame(interpolated_tensor, h, w)
 
-def make_inference(rife, I0, I1, n):
-    """Recursively generate intermediate frames using RIFE.
+def make_inference(rife, I0, I1, exp):
+    """Generate intermediate frames using RIFE.
     
     Args:
         rife: RIFEInference instance
         I0: First frame
         I1: Last frame
-        n: Number of intermediate frames to generate
+        exp: Number of interpolation iterations:
+            1: One iteration (generates 1 frame)
+            2: Two iterations (generates 3 frames)
+            3: Three iterations (generates 7 frames)
     """
-    middle = rife.interpolate(I0, I1, 0.5)
-    if n == 1:
-        return [middle]
-    first_half = make_inference(rife, I0, middle, n=n//2)
-    second_half = make_inference(rife, middle, I1, n=n//2)
-    if n%2:
-        return [*first_half, middle, *second_half]
-    else:
-        return [*first_half, *second_half]
+    if exp == 0:
+        return []
+    
+    # Start with just the two frames
+    img_list = [I0, I1]
+    print(f"Starting with {len(img_list)} frames")
+    
+    # For each iteration, interpolate between each pair of frames
+    for i in range(exp):
+        tmp = []
+        for j in range(len(img_list) - 1):
+            # Add the first frame of the pair
+            tmp.append(img_list[j])
+            # Add an interpolated frame between the pair
+            mid = rife.interpolate(img_list[j], img_list[j + 1], 0.5)
+            tmp.append(mid)
+        # Add the last frame
+        tmp.append(img_list[-1])
+        img_list = tmp
+        print(f"After iteration {i+1}: {len(img_list)} frames")
+    
+    # Return only the interpolated frames (skip first and last)
+    return img_list[1:-1]
 
 def process_request(frame1_path, frame3_path, output_path, exp=1):
     """Process interpolation request using RIFE.
@@ -156,10 +173,11 @@ def process_request(frame1_path, frame3_path, output_path, exp=1):
         frame1_path: Path to first frame
         frame3_path: Path to last frame
         output_path: Path to save interpolated frame
-        exp: Number of interpolation steps:
+        exp: Number of interpolation iterations:
             0: Legacy mode (replace frame2 with interpolated frame)
-            1: One interpolated frame (double FPS)
-            >1: Multiple interpolated frames (2^exp - 1 frames)
+            1: One iteration (generates 1 frame)
+            2: Two iterations (generates 3 frames)
+            3: Three iterations (generates 7 frames)
     """
     try:
         # Read input frames
@@ -177,25 +195,14 @@ def process_request(frame1_path, frame3_path, output_path, exp=1):
             middle = rife.interpolate(frame1, frame3, 0.5)
             # Save only the middle frame without index
             cv2.imwrite(output_path, middle)
-        elif exp == 1:
-            # One interpolated frame mode
-            middle = rife.interpolate(frame1, frame3, 0.5)
-            frames = [frame1, middle, frame3]
-            # Save all frames with indices
-            for i, frame in enumerate(frames):
-                output_path_i = output_path.replace('.png', f'_{i}.png')
-                cv2.imwrite(output_path_i, frame)
         else:
-            # Generate frames using recursive approach
-            frames = [frame1]
-            intermediate_frames = make_inference(rife, frame1, frame3, 2**exp - 1)
-            frames.extend(intermediate_frames)
-            frames.append(frame3)
+            # For exp >= 1, generate frames using exp iterations
+            intermediate_frames = make_inference(rife, frame1, frame3, exp)
+            print(f"Generated {len(intermediate_frames)} intermediate frames")
             
-            # Save all frames with indices
-            for i, frame in enumerate(frames):
-                output_path_i = output_path.replace('.png', f'_{i}.png')
-                cv2.imwrite(output_path_i, frame)
+            # Save only the intermediate frames
+            for i, frame in enumerate(intermediate_frames):
+                cv2.imwrite(output_path.replace('.png', f'_{i}.png'), frame)
             
         return "OK"
         
